@@ -1,0 +1,176 @@
+Kafka-日志收集服务
+bearny@126.com于 2021年06月30日 14点28分 修改
+0.Kafka数据流
+
+Kafka实时日志收集-数据流图
+1.Java环境安装
+#安装 Java 8+ (推荐Java-11-openjdk)
+#1.注意选择openjdk-devel的 java-11-openjdk-devel.x86_64   
+yum list java* 
+yum install java-11-openjdk-devel.x86_64 #
+#2.环境变量
+ 	vim /etc/profile
+ 	##添加以下
+    JAVA_HOME=/usr/lib/jvm/java-11-openjdk-11.0.9.11-0.el7_9.x86_64
+    PATH=$JAVA_HOME/bin:$PATH
+    export JAVA_HOME PATH
+	##加载配置
+	source /etc/profile
+#3.查看
+java -version
+javac -version
+
+#安装 Maven
+#1.解压
+tar zxvf apache-maven-3.6.3-bin.tar.gz
+
+#2.本地仓库
+<localRepository>D:/Apache Software Foundation/Maven-3.6.3/repo</localRepository>
+#2.国内阿里云镜像
+  <mirrors>
+    <mirror>  
+      <id>alimaven</id>  
+      <name>aliyun maven</name>  
+      <url>http://maven.aliyun.com/nexus/content/groups/public/</url>  
+      <mirrorOf>central</mirrorOf>          
+    </mirror>
+  </mirrors>
+ #3.环境变量
+ 	vim /etc/profile
+ 	##添加以下
+    JAVA_HOME=/usr/lib/jvm/java-11-openjdk-11.0.9.11-0.el7_9.x86_64
+    MAVEN_HOME=/opt/maven-3.6.3
+    PATH=$JAVA_HOME/bin:$MAVEN_HOME/bin:$PATH
+    export JAVA_HOME MAVEN_HOME PATH
+	##加载配置
+	source /etc/profile
+	
+ #4.查看
+ mvn -v
+ 
+ ############################################################################################################
+ Apache Maven 3.6.3 (cecedd343002696d0abb50b32b541b8a6ba2883f)
+ Maven home: /opt/maven-3.6.3
+ Java version: 11.0.9, vendor: Red Hat, Inc., runtime: /usr/lib/jvm/java-11-openjdk-11.0.9.11-0.el7_9.x86_64
+ Default locale: zh_CN, platform encoding: UTF-8
+ OS name: "linux", version: "3.10.0-1127.el7.x86_64", arch: "amd64", family: "unix"
+ ############################################################################################################
+ 
+2.Kafka环境配置
+#1.下载
+wget https://www.apache.org/dyn/closer.cgi?path=/kafka/2.6.0/kafka_2.13-2.6.0.tgz
+​
+#2.解压
+tar -xzf kafka_2.13-2.6.0.tgz
+​
+#3.进入目录
+cd kafka_2.13-2.6.0
+​
+#4.配置zookeeper
+vim config/zookeeper.properties
+注：一定修改日志目录路径,默认在/tmp目录下，会被Linux定时清除
+​
+#5.启动zookeeper
+#bin/zookeeper-server-start.sh config/zookeeper.properties
+nohup bin/zookeeper-server-start.sh config/zookeeper.properties >> logs/run.log 2>&1 &
+​
+#6.配置kafka
+vim config/server.properties
+注：一定修改日志目录路径,默认在/tmp目录下，会被Linux定时清除
+​##参看下方3.Kafka性能调优-配置
+
+#7.启动kafka
+bin/kafka-server-start.sh -daemon config/server.properties
+#日志检查：/opt/kafka_2.13-2.6.0/logs/server.log
+​
+#8.Topic创建
+bin/kafka-topics.sh --create --topic test --bootstrap-server localhost:2181
+#9.Topic查看
+bin/kafka-topics.sh --describe --topic test --bootstrap-server localhost:2181
+#10.Producer写入
+bin/kafka-console-producer.sh --topic test --bootstrap-server localhost:9092
+#11.Consumer读取
+bin/kafka-console-consumer.sh  --topic test --bootstrap-server localhost:9092
+​
+#12.log4j配置
+vim config/log4j.properties
+vim config/tools-log4j.properties
+​#13.ZooKeeper的session的超时时间配置
+vim /opt/kafka_2.13-2.6.0/config/server.properties
+zookeeper.session.timeout.ms=300000
+#14.压力测试
+/opt/bin/kafka-producer-perf-test.sh --topic topicName --num-records 100 --record-size 1 --throughput 100 --bootstrap-server localhost:2181
+​
+ 
+3.Kafka性能调优-配置
+(*必读)kafka配置中文官方 https://kafka.apachecn.org/documentation.html#configuration
+JVM配置
+vim /opt/bin/kafka-server-start.sh
+#HEAP SIZE的最大不超过主机内存的1/2,具体根据服务器内存压力分配
+KAFKA_HEAP_OPTS="-Xmx1G -Xms1G” 
+broker网络&磁盘 IO配置
+vim /opt/kafka_2.13-2.6.0/config/server.properties
+​
+# broker处理网络IO最大线程,cpu核数加1
+num.network.threads=5
+# broker处理磁盘I/O最大线程,cpu核数2倍
+num.io.threads=8
+ 
+socket请求内存配置
+
+vim /opt/kafka_2.13-2.6.0/config/server.properties
+#socket请求的最大值，不能大于Java堆的大小(JVM配置里的Xms值)，防止OOM,默认104857600 bytes(100M)
+socket.request.max.bytes=104857600
+ 
+log数据文件刷盘策略
+# 每当producer写入10000条消息时,刷数据到磁盘,提高producer写入吞吐量
+log.flush.interval.messages=10000
+# 每间隔1秒钟时间,刷数据到磁盘,减少缓存数据未写盘导致的数据不一致
+log.flush.interval.ms=1000
+日志保留策略配置
+# 日志保留时长
+log.retention.hours=168
+# 单个日志段文件最大值,回收磁盘空间 1073741824 bytes = 1g
+log.segment.bytes=1073741824
+#kafka消息队列,生产时间戳
+#kafka消息队列,生产时间戳
+log.message.timestamp.type=LogAppendTime
+ 
+4.Kafka CS GUI - kafkatpool
+##下载该客户端,本地使用,勿安装在服务器端,下载地址
+https://www.kafkatool.com/download.html
+
+#软件设置
+Cluster name 172.0.71.54 ##显示名称,可以自己修改
+Kafka Cluster Version 2.6
+Zookeper Host 172.0.71.54
+Zookeper Port 2181
+chroot path /
+ 
+5.Kafka Web UI-Kafdrop[备用方案]
+#搭建纯内网的web页面-目前只能基于docker,可以部署在服务器上,提供访问地址
+https://github.com/obsidiandynamics/kafdrop
+https://hub.docker.com/r/obsidiandynamics/kafdrop
+
+#拉取镜像
+docker pull obsidiandynamics/kafdrop
+
+#创建并启动容器
+docker run -d --rm -p 8080:9000 \
+-e KAFKA_BROKERCONNECT=172.0.71.54:9092\
+-e JVM_OPTS="-Xms32M -Xmx64M" \
+-e SERVER_SERVLET_CONTEXTPATH="/" \
+obsidiandynamics/kafdrop:latest
+
+#访问
+http://localhost:8080/
+
+6.附表
+名称	说明
+服务器IP	172.0.71.54
+java安装路径	/usr/lib/jvm/java-11-openjdk-11.0.9.11-0.el7_9.x86_64
+kafka安装路径	/opt/kafka_2.13-2.6.0
+zookeeper端口	2181
+kafka-broker-0端口	9092
+zookeeper日志目录	/tmp/zookeeper（按需更改/opt/kafka_2.13-2.6.0/config/zookeeper.properties）
+kafka日志目录	/tmp/kafka-logs（按需更改/opt/kafka_2.13-2.6.0/config/server.properties）
